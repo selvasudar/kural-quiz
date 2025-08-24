@@ -2,8 +2,6 @@ import streamlit as st
 import random
 import time
 from datasets import load_dataset
-from sentence_transformers import SentenceTransformer, util
-import torch
 
 # Load dataset (cached by HuggingFace after first load)
 @st.cache_data
@@ -11,47 +9,41 @@ def load_thirukural():
     dataset = load_dataset("Selvakumarduraipandian/Thirukural")
     return dataset["train"]
 
-# Load SentenceTransformer model (cached)
-@st.cache_resource
-def load_model():
-    return SentenceTransformer("all-MiniLM-L6-v2")
+# Generate random distractors (simpler approach without ML)
+def get_random_distractors(all_data, correct_text, column, count=3):
+    options = [x[column] for x in all_data if x[column] != correct_text]
+    return random.sample(options, min(count, len(options)))
 
-# Generate semantic distractors for MCQs
-def get_distractors(model, all_data, correct_text, column, top_k=3):
-    corpus = [x[column] for x in all_data if x[column] != correct_text]
-    embeddings = model.encode(corpus, convert_to_tensor=True)
-    query_emb = model.encode(correct_text, convert_to_tensor=True)
-    hits = util.semantic_search(query_emb, embeddings, top_k=top_k)[0]
-    distractors = [corpus[hit['corpus_id']] for hit in hits]
-    return distractors
-
-# Generate a question with semantic options
-def generate_question(entry, all_data, model, number_column):
+# Generate a question
+def generate_question(entry, all_data, number_column):
     q_type = random.choice(["number", "meaning", "adhigaram"])
     
     if q_type == "number":
-        question = f"Identify the number of this Thirukkural:\n\n{entry['Kural']}"
+        question = f"Identify the number of this Thirukkural:"
+        kural_html = entry['Kural']
         correct = str(entry[number_column])
         options = random.sample([str(x[number_column]) for x in all_data if x[number_column] != entry[number_column]], 3)
         options.append(correct)
         random.shuffle(options)
-        return question, options, correct
+        return question, kural_html, options, correct
 
     elif q_type == "meaning":
-        question = f"What is the correct meaning of this Thirukkural?\n\n{entry['Kural']}"
+        question = f"What is the correct meaning of this Thirukkural?"
+        kural_html = entry['Kural']
         correct = entry["Vilakam"]
-        distractors = get_distractors(model, all_data, correct, "Vilakam", top_k=3)
+        distractors = get_random_distractors(all_data, correct, "Vilakam", 3)
         options = distractors + [correct]
         random.shuffle(options)
-        return question, options, correct
+        return question, kural_html, options, correct
 
     elif q_type == "adhigaram":
-        question = f"This Thirukkural belongs to which Adhigaram?\n\n{entry['Kural']}"
+        question = f"This Thirukkural belongs to which Adhigaram?"
+        kural_html = entry['Kural']
         correct = entry["Adhigaram"]
-        distractors = get_distractors(model, all_data, correct, "Adhigaram", top_k=3)
+        distractors = get_random_distractors(all_data, correct, "Adhigaram", 3)
         options = distractors + [correct]
         random.shuffle(options)
-        return question, options, correct
+        return question, kural_html, options, correct
 
 # ------------------ STREAMLIT APP ------------------
 
@@ -71,31 +63,35 @@ with st.sidebar:
 # Also show creator info in main area (smaller)
 col1, col2 = st.columns([3, 1])
 with col2:
-    st.markdown("""""", unsafe_allow_html=True)
+    st.markdown("""    
+    """, unsafe_allow_html=True)
 
-# Load data and model
-data = load_thirukural()
-model = load_model()
+# Load data
+try:
+    data = load_thirukural()
+    
+    # Debug: Show available columns
+    if "columns_checked" not in st.session_state:
+        st.session_state.columns_checked = True
+        sample_entry = data[0]
+        
+        # Try to find the number column
+        number_column = None
+        for col in ['number', 'Number', 'Kural_Number', 'id', 'ID']:
+            if col in sample_entry:
+                number_column = col
+                break
+        
+        if number_column:
+            st.session_state.number_column = number_column
+        else:
+            st.error(f"Could not find a number column. Available columns: {list(sample_entry.keys())}")
+            st.stop()
 
-# Debug: Show available columns
-if "columns_checked" not in st.session_state:
-    st.session_state.columns_checked = True
-    sample_entry = data[0]
-    # st.write("**Debug Info - Available columns:**", list(sample_entry.keys()))
-    
-    # Try to find the number column
-    number_column = None
-    for col in ['number', 'Number', 'Kural_Number', 'id', 'ID']:
-        if col in sample_entry:
-            number_column = col
-            break
-    
-    if number_column:
-        # st.success(f"Found number column: '{number_column}'")
-        st.session_state.number_column = number_column
-    else:
-        st.error("Could not find a number column. Please check the column names above.")
-        st.stop()
+except Exception as e:
+    st.error(f"Failed to load dataset: {str(e)}")
+    st.info("Please check if the dataset name 'Selvakumarduraipandian/Thirukural' is correct.")
+    st.stop()
 
 if "score" not in st.session_state:
     st.session_state.score = 0
@@ -114,21 +110,39 @@ if st.session_state.total_qs == 0:
         st.session_state.total_qs = total
         st.session_state.q_no = 1
         entry = random.choice(data)
-        q, options, correct = generate_question(entry, data, model, st.session_state.number_column)
-        st.session_state.current_q = (q, options)
+        q, kural_html, options, correct = generate_question(entry, data, st.session_state.number_column)
+        st.session_state.current_q = (q, kural_html, options)
         st.session_state.correct = correct
         st.rerun()
 
 # Quiz in progress
 elif st.session_state.q_no <= st.session_state.total_qs:
-    q, options = st.session_state.current_q
+    q, kural_html, options = st.session_state.current_q
     correct = st.session_state.correct
 
     # Show progress
     st.progress(st.session_state.q_no / st.session_state.total_qs)
     st.markdown(f"**Question {st.session_state.q_no} of {st.session_state.total_qs}** | **Score: {st.session_state.score}/{st.session_state.q_no-1}**" if st.session_state.q_no > 1 else f"**Question {st.session_state.q_no} of {st.session_state.total_qs}**")
 
+    # Display question
     st.markdown(f"### {q}")
+    
+    # Display Kural with proper HTML rendering and styling
+    st.markdown(f"""
+    <div style='
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        font-size: 1.2em;
+        font-weight: 500;
+        margin: 20px 0;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    '>
+        {kural_html}
+    </div>
+    """, unsafe_allow_html=True)
 
     # Show result if answer was submitted
     if st.session_state.show_result:
@@ -149,8 +163,8 @@ elif st.session_state.q_no <= st.session_state.total_qs:
         
         if st.session_state.q_no <= st.session_state.total_qs:
             entry = random.choice(data)
-            q, options, correct = generate_question(entry, data, model, st.session_state.number_column)
-            st.session_state.current_q = (q, options)
+            q, kural_html, options, correct = generate_question(entry, data, st.session_state.number_column)
+            st.session_state.current_q = (q, kural_html, options)
             st.session_state.correct = correct
         st.rerun()
     
