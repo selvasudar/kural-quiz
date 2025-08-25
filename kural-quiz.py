@@ -14,22 +14,14 @@ def get_random_distractors(all_data, correct_text, column, count=3):
     options = [x[column] for x in all_data if x[column] != correct_text]
     return random.sample(options, min(count, len(options)))
 
-# Generate a question
-def generate_question(entry, all_data, number_column):
-    q_type = random.choice(["number", "meaning", "adhigaram"])
+# Generate a question (updated with more types based on dataset columns)
+def generate_question(entry, all_data):
+    q_type = random.choice(["meaning", "adhigaram", "paal", "iyal", "couplet", "kalaingar_urai", "word_context"])
     
-    if q_type == "number":
-        question = f"Identify the number of this Thirukkural:"
-        kural_html = entry['Kural']
-        correct = str(entry[number_column])
-        options = random.sample([str(x[number_column]) for x in all_data if x[number_column] != entry[number_column]], 3)
-        options.append(correct)
-        random.shuffle(options)
-        return question, kural_html, options, correct
-
-    elif q_type == "meaning":
+    kural_html = entry['Kural']
+    
+    if q_type == "meaning":
         question = f"What is the correct meaning of this Thirukkural?"
-        kural_html = entry['Kural']
         correct = entry["Vilakam"]
         distractors = get_random_distractors(all_data, correct, "Vilakam", 3)
         options = distractors + [correct]
@@ -38,9 +30,52 @@ def generate_question(entry, all_data, number_column):
 
     elif q_type == "adhigaram":
         question = f"This Thirukkural belongs to which Adhigaram?"
-        kural_html = entry['Kural']
         correct = entry["Adhigaram"]
         distractors = get_random_distractors(all_data, correct, "Adhigaram", 3)
+        options = distractors + [correct]
+        random.shuffle(options)
+        return question, kural_html, options, correct
+
+    elif q_type == "paal":
+        question = f"This Thirukkural belongs to which Paal?"
+        correct = entry["Paal"]
+        distractors = get_random_distractors(all_data, correct, "Paal", 3)
+        options = distractors + [correct]
+        random.shuffle(options)
+        return question, kural_html, options, correct
+
+    elif q_type == "iyal":
+        question = f"This Thirukkural belongs to which Iyal?"
+        correct = entry["Iyal"]
+        distractors = get_random_distractors(all_data, correct, "Iyal", 3)
+        options = distractors + [correct]
+        random.shuffle(options)
+        return question, kural_html, options, correct
+
+    elif q_type == "couplet":
+        question = f"What is the English Couplet for this Thirukkural?"
+        correct = entry["Couplet"]
+        distractors = get_random_distractors(all_data, correct, "Couplet", 3)
+        options = distractors + [correct]
+        random.shuffle(options)
+        return question, kural_html, options, correct
+
+    elif q_type == "kalaingar_urai":
+        question = f"What is Kalaingar's Urai for this Thirukkural?"
+        correct = entry["Kalaingar_Urai"]
+        distractors = get_random_distractors(all_data, correct, "Kalaingar_Urai", 3)
+        options = distractors + [correct]
+        random.shuffle(options)
+        return question, kural_html, options, correct
+
+    elif q_type == "word_context":
+        # Pick a random word from Kural (split by spaces, ignore punctuation)
+        words = entry['Kural'].replace('<br />', ' ').split()
+        word = random.choice(words)
+        question = f"What is the contextual role or related phrase for the word '{word}' in this Thirukkural? (Based on Vilakam)"
+        # Approximate "meaning" by finding a phrase in Vilakam (or use full Vilakam as correct; distractors from other Vilakams)
+        correct = entry["Vilakam"]  # Full Vilakam as proxy; could parse for word if needed
+        distractors = get_random_distractors(all_data, correct, "Vilakam", 3)
         options = distractors + [correct]
         random.shuffle(options)
         return question, kural_html, options, correct
@@ -60,34 +95,10 @@ with st.sidebar:
     st.markdown("[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=flat&logo=linkedin&logoColor=white)](https://linkedin.com/in/selvakumarduraipandian)")
     st.markdown("---")
     
-# Also show creator info in main area (smaller)
-col1, col2 = st.columns([3, 1])
-with col2:
-    st.markdown("""    
-    """, unsafe_allow_html=True)
-
 # Load data
 try:
     data = load_thirukural()
     
-    # Debug: Show available columns
-    if "columns_checked" not in st.session_state:
-        st.session_state.columns_checked = True
-        sample_entry = data[0]
-        
-        # Try to find the number column
-        number_column = None
-        for col in ['number', 'Number', 'Kural_Number', 'id', 'ID']:
-            if col in sample_entry:
-                number_column = col
-                break
-        
-        if number_column:
-            st.session_state.number_column = number_column
-        else:
-            st.error(f"Could not find a number column. Available columns: {list(sample_entry.keys())}")
-            st.stop()
-
 except Exception as e:
     st.error(f"Failed to load dataset: {str(e)}")
     st.info("Please check if the dataset name 'Selvakumarduraipandian/Thirukural' is correct.")
@@ -110,7 +121,7 @@ if st.session_state.total_qs == 0:
         st.session_state.total_qs = total
         st.session_state.q_no = 1
         entry = random.choice(data)
-        q, kural_html, options, correct = generate_question(entry, data, st.session_state.number_column)
+        q, kural_html, options, correct = generate_question(entry, data)
         st.session_state.current_q = (q, kural_html, options)
         st.session_state.correct = correct
         st.rerun()
@@ -163,7 +174,7 @@ elif st.session_state.q_no <= st.session_state.total_qs:
         
         if st.session_state.q_no <= st.session_state.total_qs:
             entry = random.choice(data)
-            q, kural_html, options, correct = generate_question(entry, data, st.session_state.number_column)
+            q, kural_html, options, correct = generate_question(entry, data)
             st.session_state.current_q = (q, kural_html, options)
             st.session_state.correct = correct
         st.rerun()
@@ -202,14 +213,29 @@ else:
             st.metric("Grade", "Keep Learning! 📚")
     
     # Motivational message
-    if percentage == 100:
-        st.markdown("### 🏆 Perfect Score! You're a Thirukkural Master!")
-    elif percentage >= 80:
-        st.markdown("### 🌟 Excellent work! You know your Thirukkural well!")
-    elif percentage >= 60:
-        st.markdown("### 👍 Good job! Keep exploring more Thirukkural wisdom!")
+    # Show YouTube meme video if score is zero, otherwise show markdown message
+    if st.session_state.score == 0:
+        # Example: Vadivelu comedy clip (replace with your preferred YouTube video)
+        youtube_embed_url = "https://www.youtube.com/embed/3h7iUEBP7XQ"  # Replace with actual YouTube embed URL
+        st.markdown(
+            f"""
+            <div style='text-align: center;'>
+                <h4>Oops, no points! Here's a meme to cheer you up! 😄</h4>
+                <iframe width="560" height="315" src="{youtube_embed_url}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
     else:
-        st.markdown("### 📚 Great start! Practice more to improve your knowledge!")
+        if percentage == 100:
+            st.markdown("### 🏆 Perfect Score! You're a Thirukkural Master!")
+        elif percentage >= 80:
+            st.markdown("### 🌟 Excellent work! You know your Thirukkural well!")
+        elif percentage >= 60:
+            st.markdown("### 👍 Good job! Keep exploring more Thirukkural wisdom!")
+            
+        else:
+            st.markdown("### 📚 Great start! Practice more to improve your knowledge!")
     
     if st.button("🔄 Play Again", type="primary"):
         st.session_state.score = 0
